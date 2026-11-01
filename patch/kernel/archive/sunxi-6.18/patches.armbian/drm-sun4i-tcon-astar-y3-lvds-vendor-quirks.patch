@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: astar-y3 port <astar-y3@localhost>
+Date: Sun, 1 Nov 2026 10:46:41 +0000
+Subject: drm/sun4i: tcon: vendor LVDS quirks for the Yifang astar_y3 tablet
+
+The LVDS panel shipped with the Yifang astar_y3 tablet only shows
+rolling stripes with the stock mainline LVDS setup. The vendor kernel
+programs inverted LVDS clock/data polarity, H/V sync widths in BASIC3,
+all four DCLK gate phases and an extra register at 0x1f0 - none of
+which have DT bindings. Values recovered via /dev/mem from the stock
+Android firmware.
+
+Signed-off-by: astar-y3 port <astar-y3@localhost>
+---
+ drivers/gpu/drm/sun4i/sun4i_tcon.c | 24 ++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/drivers/gpu/drm/sun4i/sun4i_tcon.c b/drivers/gpu/drm/sun4i/sun4i_tcon.c
+index 3a6afb741979..2979cd90fada 100644
+--- a/drivers/gpu/drm/sun4i/sun4i_tcon.c
++++ b/drivers/gpu/drm/sun4i/sun4i_tcon.c
+@@ -537,10 +537,34 @@ static void sun4i_tcon0_mode_set_lvds(struct sun4i_tcon *tcon,
+ 		     SUN4I_TCON0_BASIC2_V_BACKPORCH(bp));
+ 
+ 	reg = SUN4I_TCON0_LVDS_IF_CLK_SEL_TCON0 |
+ 		SUN4I_TCON0_LVDS_IF_DATA_POL_NORMAL |
+ 		SUN4I_TCON0_LVDS_IF_CLK_POL_NORMAL;
++
++	/*
++	 * The LVDS panel of the Yifang astar_y3 tablet needs inverted
++	 * clock/data polarity, H/V sync widths in BASIC3, all four DCLK
++	 * gate phases and an extra magic register to lock. Values dumped
++	 * from the stock Android kernel via /dev/mem.
++	 */
++	if (of_machine_is_compatible("yifang,astar-y3")) {
++		reg = SUN4I_TCON0_LVDS_IF_CLK_SEL_TCON0 |
++			SUN4I_TCON0_LVDS_IF_DATA_POL_INV |
++			SUN4I_TCON0_LVDS_IF_CLK_POL_INV;
++
++		regmap_write(tcon->regs, SUN4I_TCON0_BASIC3_REG,
++			     SUN4I_TCON0_BASIC3_H_SYNC(mode->hsync_end -
++						       mode->hsync_start) |
++			     SUN4I_TCON0_BASIC3_V_SYNC(mode->vsync_end -
++						       mode->vsync_start));
++
++		regmap_update_bits(tcon->regs, SUN4I_TCON0_DCLK_REG,
++				   GENMASK(31, 28), GENMASK(31, 28));
++
++		regmap_write(tcon->regs, 0x1f0, 0x0bb80003);
++	}
++
+ 	if (sun4i_tcon_get_pixel_depth(encoder) == 24)
+ 		reg |= SUN4I_TCON0_LVDS_IF_BITWIDTH_24BITS;
+ 	else
+ 		reg |= SUN4I_TCON0_LVDS_IF_BITWIDTH_18BITS;
+ 
+-- 
+Created with Armbian build tools https://github.com/armbian/build
+

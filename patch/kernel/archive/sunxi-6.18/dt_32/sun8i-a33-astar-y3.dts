@@ -1,0 +1,356 @@
+// SPDX-License-Identifier: (GPL-2.0+ or MIT)
+/*
+ * DTS for the Yifang "astar_y3" A33 tablet (marketed as "QUAD-CORE A33 y3",
+ * firmware yf_a33_V05 / astar_y3 / 56iqDS, Allwinner A33, 1 GB RAM, eMMC).
+ *
+ * Hardware information was recovered from the stock Android 4.4.2
+ * installation (lichee-3.4.39 BSP kernel) via adb:
+ *
+ *   - LCD: 1024x600 LVDS panel ("24Bit LVDS" per vendor kernel),
+ *   LVDS0 on PD18..PD27, backlight on PWM0
+ *     dmesg [DISP]: lcd_hbp = 158, lcd_vt = 635, lcd_vbp = 23,
+ *   lcd_hspw = 20, lcd_vspw = 3, "WRN03: Recommend lcd_dclk_frq = 51"
+ *   (lcd_ht = 1344 / hfront-porch = 142 computed from the recommended
+ *   51 MHz dot clock, vfront-porch = 9 from lcd_vt)
+ *   - Touch: Ilitek controller (BSP "ilitek_i2c"), i2c0 (PH2/PH3) addr 0x41,
+ *   IRQ = PB5 (BSP gpio 37), reset/wakeup = PH1 (BSP gpio 225, active high)
+ *   - Wi-Fi/BT: AMPAK AP6210 (Broadcom BCM43362, fw_bcm40181a2) on mmc1,
+ *   WL_REGON = PL4 (BSP gpio 356), BT_REGON = PL5 (BSP gpio 357),
+ *   BT HCI on uart1 (PG6..PG9, 4 wire)
+ *   - PMIC: AXP223 on RSB; touch rail ELDO1 @ 3.0V, wifi rail DLDO1 @ 3.3V
+ *   - RTC: NXP PCF8583 on i2c1 (PH4/PH5), addr 0x50
+ *   - Accelerometer: MMA865x on i2c1 @ 0x1d (no mainline driver, left out)
+ *   - Camera: GC2035 on i2c2 (PE12/PE13) + parallel CSI (PE0..PE11),
+ *   reset/pwdn = PE15/PE16 (no mainline driver, left out)
+ *   - Debug UART: PB0/PB1 (115200 8N1), TF-card detect = PB4, USB0 ID = PH8
+ *   - Leds: red/green on AXP223 GPIO0/GPIO2 (not wired up in mainline)
+ */
+
+/dts-v1/;
+#include "sun8i-a33.dtsi"
+#include "sun8i-reference-design-tablet.dtsi"
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/pwm/pwm.h>
+
+/ {
+	model = "Yifang astar_y3 quad-core tablet (A33)";
+	compatible = "yifang,astar-y3", "allwinner,sun8i-a33";
+
+	aliases {
+		ethernet0 = &sdio_wifi;
+		serial0 = &uart0;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+
+	panel {
+		compatible = "yifang,astar-y3-lcd", "panel-lvds";
+
+		/*
+		 * Vendor reports "24Bit LVDS Panel" - 4 data pairs + clock,
+		 * wired to PD18..PD27 (LVDS0 function of the A33 TCON).
+		 * Start with VESA mapping; flip to "jeida-24" if colors are
+		 * swapped.
+		 */
+		data-mapping = "vesa-24";
+
+		backlight = <&backlight>;
+		power-supply = <&reg_dc1sw>;
+		enable-gpios = <&pio 7 7 GPIO_ACTIVE_HIGH>; /* PH7 */
+
+		width-mm = <154>;
+		height-mm = <91>;
+
+		/*
+		 * Timings as configured by the vendor kernel (60 Hz).
+		 * Porch split (B-variant) verified against the vendor TCON
+		 * BASIC1/BASIC2 registers dumped via /dev/mem: hbp/vbp in the
+		 * Allwinner fex semantics INCLUDE the sync widths.
+		 * hsync/vsync polarity: active-high (vendor IO_POL = 0).
+		 * The LVDS clock/data polarity quirks for this panel cannot be
+		 * expressed in DT and are handled by the kernel patch
+		 * "drm-sun4i-tcon-astar-y3-lvds-vendor-quirks.patch".
+		 */
+		panel-timing {
+			clock-frequency = <51000000>;
+
+			hactive = <1024>;
+			hfront-porch = <162>;
+			hback-porch = <138>;
+			hsync-len = <20>;
+
+			vactive = <600>;
+			vfront-porch = <12>;
+			vback-porch = <20>;
+			vsync-len = <3>;
+
+			hsync-active = <1>;
+			vsync-active = <1>;
+			de-active = <1>;
+			pixelclk-active = <1>;
+		};
+
+		port {
+			panel_input: endpoint {
+				remote-endpoint = <&tcon0_out_lcd>;
+			};
+		};
+	};
+
+	wifi_pwrseq: wifi-pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		/*
+		 * Vendor firmware drives FOUR r_pio lines high for the wifi
+		 * module (raw r_pio dump from Android: PL4, PL6, PL8, PL11):
+		 * WL_REGON plus module LDO/32k enables. All are released
+		 * (driven high) together on power-up.
+		 */
+		reset-gpios = <&r_pio 0 4 GPIO_ACTIVE_LOW>,  /* PL4 WL_REGON */
+			      <&r_pio 0 6 GPIO_ACTIVE_LOW>,  /* PL6 module en */
+			      <&r_pio 0 8 GPIO_ACTIVE_LOW>,  /* PL8 module en */
+			      <&r_pio 0 11 GPIO_ACTIVE_LOW>; /* PL11 module en */
+		/* AP6210 modules often need the RTC 32k fanout clock (LPO) */
+		clocks = <&rtc CLK_OSC32K_FANOUT>;
+		clock-names = "ext_clock";
+		post-power-on-delay-ms = <300>;
+	};
+};
+
+&codec {
+	status = "okay";
+};
+
+&dai {
+	status = "okay";
+};
+
+&de {
+	status = "okay";
+};
+
+&ehci0 {
+	status = "okay";
+};
+
+/* Third physical I2C bus (PE12/PE13), free on this board (no camera) */
+&i2c2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c2_pins>;
+	status = "okay";
+};
+
+/*
+ * i2c bus map confirmed by i2cdetect (PH2/PH3 bus, PH4/PH5 bus):
+ *   bus0 (i2c0): ILI210x touch @0x41, PCF8583 RTC @0x50
+ *   bus1 (i2c1): MMA865x accelerometer @0x1d (no mainline driver)
+ *   bus2 (i2c2): empty
+ * Note: the vendor wired the RTC to the SAME bus as the touch.
+ */
+&i2c0 {
+	/* PCF8583 is only rated for 100 kHz - slow the bus down for it */
+	clock-frequency = <100000>;
+
+	/* Battery backed RTC, shares the bus with the touch panel */
+	rtc@50 {
+		compatible = "nxp,pcf8583";
+		reg = <0x50>;
+	};
+};
+
+&mmc1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&mmc1_pg_pins_pullup>;
+	vmmc-supply = <&reg_dldo1>;
+	mmc-pwrseq = <&wifi_pwrseq>;
+	bus-width = <4>;
+	non-removable;
+	max-frequency = <50000000>;
+	status = "okay";
+
+	sdio_wifi: wifi@1 {
+		reg = <1>;
+	};
+};
+
+&r_pio {
+	/* BT_REGON high: the AP6210 shares internal LDO enables with the
+	 * BT section; the vendor firmware drives it high during wifi use */
+	bt_regon_hub: bt-regon-hub {
+		gpio-hog;
+		gpios = <0 5 GPIO_ACTIVE_HIGH>; /* PL5 */
+		line-name = "bt_regon";
+		output-high;
+	};
+};
+
+/* Internal eMMC (Android dual-boot storage), 8-bit on mmc2 */
+&mmc2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&mmc2_8bit_pins>;
+	vmmc-supply = <&reg_dcdc1>;
+	bus-width = <8>;
+	non-removable;
+	status = "okay";
+};
+
+&ohci0 {
+	status = "okay";
+};
+
+/*
+ * Regulator states mirrored 1:1 from the live tablet (stock Android BSP),
+ * see tablet_dump/regulators.txt:
+ *   aldo1=3.0V  aldo2=2.5V  aldo3=3.0V        dcdc1=3.0V
+ *   dcdc2=1.1V (cpu dvfs rail, range kept)    dcdc3=1.32V (fixed)
+ *   dcdc5=1.5V  dc5ldo=1.1V  dc1sw=on (switch of dcdc1)
+ *   dldo1=3.3V (wifi)  ldo_io0=2.8V (on)      eldo1=3.0V (touch)
+ *   dldo3=2.8V (off)   eldo2=1.8V (off)       dldo2/dldo4/eldo3 (off)
+ */
+&reg_aldo2 {
+	regulator-min-microvolt = <2500000>;
+	regulator-max-microvolt = <2500000>;
+};
+
+&reg_aldo3 {
+	regulator-min-microvolt = <3000000>;
+	regulator-max-microvolt = <3000000>;
+};
+
+&reg_dcdc3 {
+	regulator-min-microvolt = <1320000>;
+	regulator-max-microvolt = <1320000>;
+};
+
+&reg_dc5ldo {
+	regulator-min-microvolt = <1100000>;
+	regulator-max-microvolt = <1100000>;
+};
+
+/* enabled at 2.8V on the device (sensor rail of the camera board) */
+&reg_ldo_io0 {
+	regulator-min-microvolt = <2800000>;
+	regulator-max-microvolt = <2800000>;
+	regulator-always-on;
+	status = "okay";
+};
+
+/*
+ * Vendor kernel powers the touch panel from ELDO1 @ 3.0V. Android's CTP
+ * driver enables it on demand; mainline has no consumer for it, so keep
+ * it always on.
+ */
+&reg_eldo1 {
+	regulator-min-microvolt = <3000000>;
+	regulator-max-microvolt = <3000000>;
+	regulator-name = "vcc-ctp";
+	regulator-always-on;
+};
+
+&reg_dldo3 {
+	regulator-min-microvolt = <2800000>;
+	regulator-max-microvolt = <2800000>;
+};
+
+&reg_eldo2 {
+	regulator-min-microvolt = <1800000>;
+	regulator-max-microvolt = <1800000>;
+};
+
+/*
+ * DLDO1 @ 3.3V: SDIO wifi supply AND the enable for the USB host VBUS
+ * boost converter (see &usbphy below). Pinned explicitly so it can
+ * never be re-probed to a different voltage.
+ */
+&reg_dldo1 {
+	regulator-min-microvolt = <3300000>;
+	regulator-max-microvolt = <3300000>;
+	regulator-name = "vcc-wifi-usb";
+	regulator-always-on;
+};
+
+/*
+ * The internal USB host bus (Genesys Logic GL850-style hub 05e3:0608 with
+ * a Supereal SR9800 USB ethernet 0fe6:9800 behind it) is powered from
+ * PMIC DLDO1 @ 3.3V (gates the 5V VBUS boost) - confirmed by prior
+ * hands-on experiments on this very board and matching the upstream
+ * q8 tablet reference design (sun8i-q8-common.dtsi).
+ */
+&usbphy {
+	usb1_vbus-supply = <&reg_dldo1>;
+};
+
+&sound {
+	/* Board level jack widgets */
+	simple-audio-card,widgets = "Microphone", "Microphone Jack",
+				    "Headphone", "Headphone Jack";
+	/* Board level routing. First 2 routes copied from SoC level */
+	simple-audio-card,routing =
+		"Left DAC", "DACL",
+		"Right DAC", "DACR",
+		"HP", "HPCOM",
+		"Headphone Jack", "HP",
+		"MIC1", "Microphone Jack",
+		"Microphone Jack", "MBIAS";
+	status = "okay";
+};
+
+&pio {
+	lvds0_pins: lvds0-pins {
+		pins = "PD18", "PD19", "PD20", "PD21", "PD22", "PD23",
+		       "PD24", "PD25", "PD26", "PD27";
+		function = "lvds0";
+	};
+
+	/* vendor BSP drives the SDIO bus with pull-ups + strong drivers */
+	mmc1_pg_pins_pullup: mmc1-pg-pins-pullup {
+		pins = "PG0", "PG1", "PG2", "PG3", "PG4", "PG5";
+		function = "mmc1";
+		drive-strength = <30>;
+		bias-pull-up;
+	};
+};
+
+&tcon0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&lvds0_pins>;
+	status = "okay";
+};
+
+&tcon0_out {
+	tcon0_out_lcd: endpoint@0 {
+		reg = <0>;
+		remote-endpoint = <&panel_input>;
+	};
+};
+
+&touchscreen {
+	reg = <0x41>;
+	compatible = "ilitek,ili210x";
+	/delete-property/ power-gpios;
+	/*
+	 * PH1 is "wakeup", active high in the vendor kernel, so model it
+	 * as an active-low reset: ili210x releases it (drives it high)
+	 * after probing.
+	 */
+	reset-gpios = <&pio 7 1 GPIO_ACTIVE_LOW>; /* PH1 */
+	touchscreen-size-x = <1024>;
+	touchscreen-size-y = <600>;
+	status = "okay";
+};
+
+&uart0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart0_pb_pins>;
+	status = "okay";
+};
+
+/* AP6210 bluetooth HCI (4-wire, needs userspace hciattach) */
+&uart1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart1_pg_pins>, <&uart1_cts_rts_pg_pins>;
+	status = "okay";
+};
